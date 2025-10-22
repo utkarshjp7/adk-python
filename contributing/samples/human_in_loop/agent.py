@@ -18,6 +18,7 @@ from google.adk import Agent
 from google.adk.tools.long_running_tool import LongRunningFunctionTool
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
+import uuid
 
 
 def reimburse(purpose: str, amount: float) -> str:
@@ -34,7 +35,7 @@ def ask_for_approval(
   return {
       'status': 'pending',
       'amount': amount,
-      'ticketId': 'reimbursement-ticket-001',
+      'ticketId': str(uuid.uuid4()),
   }
 
 

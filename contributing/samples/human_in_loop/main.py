@@ -49,11 +49,12 @@ async def main():
       session_service=session_service,
   )
 
+  print(f"--- Started session {session.id} ---")
+
   async def call_agent(query: str):
     content = types.Content(role="user", parts=[types.Part(text=query)])
 
-    print(f'>>> User Query: "{query}"')
-    print("--- Running agent's initial turn ---")
+    print(f'\n>>> User Query: "{query}"\n')
 
     events_async = runner.run_async(
         session_id=session.id, user_id=USER_ID, new_message=content
@@ -67,28 +68,13 @@ async def main():
       if event.content and event.content.parts:
         for i, part in enumerate(event.content.parts):
           if part.text:
-            print(f"    Part {i} [Text]: {part.text.strip()}")
+            print(f"\n>>> Agent: {part.text.strip()}\n")
           if part.function_call:
-            print(
-                f"    Part {i} [FunctionCall]:"
-                f" {part.function_call.name}({part.function_call.args}) ID:"
-                f" {part.function_call.id}"
-            )
             if not long_running_function_call and part.function_call.id in (
                 event.long_running_tool_ids or []
             ):
               long_running_function_call = part.function_call
-              print(
-                  "      (Captured as long_running_function_call for"
-                  f" '{part.function_call.name}')"
-              )
           if part.function_response:
-            print(
-                f"    Part {i} [FunctionResponse]: For"
-                f" '{part.function_response.name}', ID:"
-                f" {part.function_response.id}, Response:"
-                f" {part.function_response.response}"
-            )
             if (
                 long_running_function_call
                 and part.function_response.id == long_running_function_call.id
@@ -96,19 +82,14 @@ async def main():
               initial_tool_response = part.function_response
               if initial_tool_response.response:
                 ticket_id = initial_tool_response.response.get("ticketId")
-              print(
-                  "      (Captured as initial_tool_response for"
-                  f" '{part.function_response.name}', Ticket ID: {ticket_id})"
-              )
-
-    print("--- End of agent's initial turn ---\n")
 
     if (
         long_running_function_call
         and initial_tool_response
         and initial_tool_response.response.get("status") == "pending"
     ):
-      print(f"--- Simulating external approval for ticket: {ticket_id} ---\n")
+      print(f"--- Sending ticket for manager approval with ID: {ticket_id}, and waiting 10 seconds to simulate manager approval.---\n")
+      await asyncio.sleep(10)
 
       updated_tool_output_data = {
           "status": "approved",
@@ -126,11 +107,8 @@ async def main():
           )
       )
 
-      print(
-          "--- Sending updated tool result to agent for call ID"
-          f" {long_running_function_call.id}: {updated_tool_output_data} ---"
-      )
-      print("--- Running agent's turn AFTER receiving updated tool result ---")
+      print(f"--- Manager approved ticket {ticket_id}. ---")
+      print(f"--- Sending update to agent for call ID: {long_running_function_call.id}. ---")
 
       async for event in runner.run_async(
           session_id=session.id,
@@ -142,21 +120,7 @@ async def main():
         if event.content and event.content.parts:
           for i, part in enumerate(event.content.parts):
             if part.text:
-              print(f"    Part {i} [Text]: {part.text.strip()}")
-            if part.function_call:
-              print(
-                  f"    Part {i} [FunctionCall]:"
-                  f" {part.function_call.name}({part.function_call.args}) ID:"
-                  f" {part.function_call.id}"
-              )
-            if part.function_response:
-              print(
-                  f"    Part {i} [FunctionResponse]: For"
-                  f" '{part.function_response.name}', ID:"
-                  f" {part.function_response.id}, Response:"
-                  f" {part.function_response.response}"
-              )
-      print("--- End of agent's turn AFTER receiving updated tool result ---")
+              print(f"\n>>> Agent: {part.text.strip()}\n")
 
     elif long_running_function_call and not initial_tool_response:
       print(
@@ -169,9 +133,15 @@ async def main():
           " turn. ---"
       )
 
-  await call_agent("Please reimburse $50 for meals")
-  print("=" * 70)
-  await call_agent("Please reimburse $200 for conference travel")
+  print("--- Sending first request ---")
+  task1 = asyncio.create_task(call_agent("Please reimburse $200 for team lunch"))
+  print("--- Waiting  seconds before sending second request. ---")
+  await asyncio.sleep(2)
+  print("--- Sending second request ---")
+  task2 = asyncio.create_task(call_agent("Please reimburse $300 for conference travel"))
+
+  await task1
+  await task2
 
 
 if __name__ == "__main__":
@@ -179,14 +149,7 @@ if __name__ == "__main__":
   project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
   if not project_id:
     raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set.")
-  print("Tracing to project", project_id)
-  processor = export.BatchSpanProcessor(
-      CloudTraceSpanExporter(project_id=project_id)
-  )
-  provider.add_span_processor(processor)
-  trace.set_tracer_provider(provider)
 
   asyncio.run(main())
 
   provider.force_flush()
-  print("Done tracing to project", project_id)
